@@ -92,6 +92,7 @@ Stdio stays as a third mode for local development.
 
 - New `src/tools.ts`: a function `registerTools(server, { tools, allowSupersede })` holds the 5 tool handlers that are in `src/index.ts` today. `tools` is the list of tool names to register. `allowSupersede` controls the `supersedes` parameter of `capture_thought`.
 - The three tool sets are: private door, 5 tools with `allowSupersede: true`; public door in Phase 2, the 3 read tools; public door in Phase 3, the 3 read tools plus `capture_thought` with `allowSupersede: false`.
+- The tool set of the public door is a constant in the code. It is not an environment variable. A reviewed commit opens `capture_thought` in Phase 3, and a wrong value in `.env` can not open a write tool.
 - `src/index.ts`: reads the mode from the environment (`stdio`, or HTTP) and starts the listeners. It uses `StreamableHTTPServerTransport` from the SDK that is already a dependency.
 - New `src/auth.ts`: token check for the public door. See Sign-in.
 - `src/db.ts`: `searchThoughts` takes a `scope` and does hybrid search. `insertThought` takes `scope`, `embedding_model` and an optional `supersedes` id.
@@ -115,7 +116,14 @@ Discovery: a Claude connector can not start a sign-in from a bare `401`. The pub
 - Each `401` response has a `WWW-Authenticate` header that points to the protected resource metadata.
 - The route `/.well-known/oauth-protected-resource` serves the protected resource metadata. The metadata names the resource address and the configured issuer.
 
-The SDK auth helpers give the header and the metadata route. `src/auth.ts` gives the token verifier (the 6 checks) to the bearer-auth middleware of the SDK.
+Division of the sign-in code, confirmed against the source of SDK 1.27.1:
+
+- `requireBearerAuth` from the SDK reads the `Authorization` header and calls the token verifier of `src/auth.ts`. It sends `401` with the `WWW-Authenticate` header, and it rejects a token with no expiry time. It covers checks 1 to 5.
+- The SDK middleware has no `403` for a wrong subject. A small middleware in `src/auth.ts` runs after it, compares the subject, and sends `403`. It covers check 6.
+- The metadata router of the SDK serves only the address with the path suffix, and it needs the full metadata of the identity provider. For that reason `src/auth.ts` has its own small metadata route. The route answers at the bare address and at the address with the path suffix (`/.well-known/oauth-protected-resource/mcp`). Phase 0b shows which form the Claude connector requests.
+- Each door gives a list of permitted host names to `createMcpExpressApp`, because the SDK adds the host check only for a localhost bind. The list comes from the ignored `.env` file.
+- The stateless transport of the SDK can not serve two requests. The server makes one transport for each request.
+- An input that fails validation comes back as a tool result with `isError: true`. The tests for `scope` and for the public `supersedes` rejection expect that form.
 
 Requirements for a candidate identity provider in Phase 0b:
 
@@ -169,8 +177,10 @@ Tokens: the server makes two sets of tokens from the query.
 - Part tokens, for the substring match. The server splits the query on white space. It removes from the start and the end of each piece each character that is not a letter or a digit. It keeps the characters inside the piece, so a hyphen, a slash or a period in a part number stays. A piece is a part token if it contains a digit and has a minimum of 3 characters. The minimum stops a token such as `1` from a match with almost each row. Example: `What size is 20x25x1?` gives the part token `20x25x1`.
 - Word tokens, for the full-text match. The server splits the query on each character that is not a letter or a digit, and makes the pieces lowercase. Each word token has only letters and digits, so it is safe in a `tsquery` with no escape. Example: `what's` gives `what` and `s`.
 
-1. Vector list: the 20 rows with the smallest cosine distance to the query embedding. This is the query that exists today, with the scope filter added.
-2. Text list: up to 20 rows that match one of two conditions.
+The size of each candidate list is `N = max(20, limit)`. `search_brain` permits a `limit` of 50, and two lists of 20 rows can not fill it.
+
+1. Vector list: the `N` rows with the smallest cosine distance to the query embedding. This is the query that exists today, with the scope filter added.
+2. Text list: up to `N` rows that match one of two conditions.
    - Substring match: a row matches if `content` contains a part token (`ILIKE`, with `%` and `_` escaped). This condition finds part numbers with a hyphen or a slash, which the text parser splits.
    - Full-text match: the server joins the word tokens with OR and makes the `tsquery` with `to_tsquery('simple', ...)`. A row matches if `content_tsv @@` that query. OR is necessary because a long question that requires all words finds no row. If the query has no word token, the server does not run the full-text match.
    - Order of the text list: substring matches first, then full-text matches by `ts_rank`. Among substring matches, the row that matches the longest part token is first, then the newest row.
@@ -185,6 +195,7 @@ The design does not assume that the `simple` configuration keeps `20x25x1` whole
 
 - `capture_thought`: new required `scope`. New optional `supersedes` (id of an old thought), on the private door only. With `supersedes`, the insert and the invalidation of the old row occur in one transaction.
 - Reason for `supersedes` in the first version: a house fact changes. A new furnace takes a different filter, and the old size must not stay in the results.
+- If the `supersedes` id does not exist, or the old row is already invalid, the call fails with a clear message. The transaction rolls back and the new fact is not stored.
 - A superseded row is invalid. Searches exclude it by the rule that exists today (`invalidated_at IS NULL`). `superseded_by` is only a link for history.
 - The public `capture_thought` (Phase 3) has no `supersedes` parameter. The public door can add a fact. It can not invalidate or replace a fact. A public call that sends `supersedes` is rejected with a clear message, and no fact is stored.
 - `search_brain` and `list_recent`: new required `scope`.
@@ -202,7 +213,7 @@ Backup: a nightly `pg_dump` writes to a directory on the home server. A weekly j
 
 | Phase | Result | Exit check |
 |---|---|---|
-| 0a. Reach | A throwaway server with only `brain_stats` and an empty database is reachable through Tailscale Funnel from Claude on the web, then from the phone. | One successful tool call from the phone. Close the tunnel in the same hour. The builder accepts this short exposure with no sign-in, because the database is empty and the server has only `brain_stats`. |
+| 0a. Reach | A throwaway server with only `brain_stats` and no database is reachable. `brain_stats` returns fixed zero counts. The server is reachable through Tailscale Funnel from Claude on the web, then from the phone. | One successful tool call from the phone. Close the tunnel in the same hour. The builder accepts this short exposure with no sign-in, because the server has no database and only `brain_stats`. |
 | 0b. Sign-in | The same throwaway server, with one candidate identity provider and `src/auth.ts` in front of it. | One signed-in tool call from the Claude connector. The builder records the name of the provider and what the connector requested: discovery metadata, PKCE, dynamic client registration. Close the tunnel after the check. |
 | 1. Private door | The builder approves and runs `schema-ollama.sql` and the migration on the new database. Compose stack on the home server. All 5 tools work from Claude Code and Claude Desktop over the tailnet. 20 real house facts are in the brain. | A search for an exact part number returns the correct fact first. The network check passes. |
 | 2. Public door, read-only | Tunnel plus sign-in. The phone can search. | The probe script passes all 5 cases. A tool list from the public door shows no write tool. |
@@ -210,6 +221,19 @@ Backup: a nightly `pg_dump` writes to a directory on the home server. A weekly j
 | Later | Nightly job fills the brain from the chores app and the recipe server. | Not designed here. |
 
 If Phase 0b fails with the first provider: try Cloudflare Tunnel with its access layer as the sign-in. If that fails too, the phone path stops. Phase 1 still gives the private door, and the builder decides between Approach C and a different phone path.
+
+## Decisions after the plan
+
+The builder made these decisions on 2026-11-12, after the implementation plan compared the design with the code. The sections above already have the changes.
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | Each candidate list has `max(20, limit)` rows. | A `limit` of 50 works, and the tool does not change for clients. |
+| 2 | `express` and `jose` are direct dependencies. | The code imports them, and an SDK update can not remove them by surprise. |
+| 3 | The public tool set is a constant in the code. | A mistake in `.env` can not open a write tool. |
+| 4 | The Phase 0a spike has no database. | Nothing is behind an endpoint that has no sign-in. |
+| 5 | A bad `supersedes` id gives an error and stores nothing. | The builder learns immediately that the id was wrong. |
+| 6 | The sign-in uses the SDK middleware plus a small subject check and a small metadata route. | The SDK has no `403` for a wrong subject and serves one metadata address only. |
 
 ## Open Questions
 
@@ -234,7 +258,9 @@ If Phase 0b fails with the first provider: try Cloudflare Tunnel with its access
 
 The deliverable is a service for one user. It is not published to npm. The fork holds the source, the migration and the Compose file. The builder deploys with `git pull` and `docker compose up -d --build` on the home server.
 
-A GitHub Actions workflow on the fork runs `npm run build` and the tests on each push. The workflow starts a `pgvector/pgvector` service container and sets `EMBEDDING_PROVIDER=stub`, so the database tests run in CI with no Ollama. The tests use the `node:test` runner that Node already has, so no new npm dependency is necessary.
+A GitHub Actions workflow on the fork runs `npm run build` and the tests on each push. The workflow starts a `pgvector/pgvector` service container and sets `EMBEDDING_PROVIDER=stub`, so the database tests run in CI with no Ollama. The tests use the `node:test` runner that Node already has, so the tests need no new npm dependency.
+
+`package.json` gets `express` and `jose` as direct dependencies, and `@types/express` as a dev dependency. The two packages are already in the lock file as dependencies of the MCP SDK. The code imports them directly, so it must declare them.
 
 The probe script and the network check need the real public door. They run on the home server, not in CI.
 
@@ -255,7 +281,7 @@ In CI, with the service container and the stub embedder:
 - Tokens: a question with an apostrophe and a question mark (`What's the size of 20x25x1?`) gives no error and returns the correct row first. A query with no letter and no digit gives no error.
 - Discovery: a `401` from the public door has the `WWW-Authenticate` header, and the metadata route names the configured issuer with no token.
 - Scope: `scope: work` does not return a `house` row. `scope: house` does not return a `general` row. `scope: all` returns each scope. A search without `scope` is rejected. A capture with a value outside the list is rejected.
-- Supersede (private door): after a capture with `supersedes`, the old row is invalid and `superseded_by` points to the new row. If the insert fails, the old row stays valid.
+- Supersede (private door): after a capture with `supersedes`, the old row is invalid and `superseded_by` points to the new row. If the insert fails, the old row stays valid. A capture with an unknown `supersedes` id, or with the id of an invalid row, gives an error and stores no row.
 - Migration: a second run of `001-scope-hybrid.sql` makes no change and gives no error.
 - Sign-in unit tests: `src/auth.ts` gives the correct status for each of the 6 checks, with tokens that the test signs.
 
