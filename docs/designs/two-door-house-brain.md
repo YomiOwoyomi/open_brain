@@ -6,6 +6,8 @@ Repo: Rixter145/open_brain
 Status: APPROVED
 Mode: Builder
 
+> **Note (2026-11-17):** The implementation plan `docs/plans/two-door-house-brain-plan.md` is later than this design, and it applies where the two disagree. The plan replaces these items of this design: the `registerTools(server, { tools, allowSupersede })` signature (now door profiles), `createMcpExpressApp` (now an app built by hand, Gate 1 item G1), "`NULL` means the model that the schema file names" (now Gate 1 item G9), and `psql` by hand (now `npm run migrate`).
+
 ## Problem Statement
 
 Each AI client of the builder has its own memory or none. Claude Code has memory files. Claude Desktop, Cursor and the Claude phone app have nothing shared. A fact that one client learns is not available to the others.
