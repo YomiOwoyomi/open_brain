@@ -1,9 +1,12 @@
-# CI: build, secret scan and tests on each push and pull request.
+# CI: build, secret scan and tests on each pull request and each push to main.
 # Rules: read-only token, actions pinned to a commit SHA, no repository secret.
 name: CI
 
 on:
+  # A pull request runs CI for its branch. A push runs CI only on main, so each
+  # pull request commit runs one time, not two times.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -79,6 +82,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # tsx runs the tests with no type check, so check the test files here.
+      - name: Type check (source and tests)
+        run: npm run typecheck
 
       - name: Tests
         run: npm test

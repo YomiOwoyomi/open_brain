@@ -95,6 +95,20 @@ test("test mode refuses a test URL with no host or no port", () => {
   assert.throws(() => describeTestDatabase("postgresql:///open_brain_test"), /host and the port/);
 });
 
+test("test mode refuses a DATABASE_URL with a host, port or database query parameter", () => {
+  for (const name of ["host", "port", "dbname"]) {
+    assert.throws(
+      () =>
+        resolveDatabaseUrl({
+          OPEN_BRAIN_TEST: "1",
+          DATABASE_URL: `postgresql://u:p@db.example:5432/brain?${name}=x`,
+          TEST_DATABASE_URL: TEST,
+        }),
+      new RegExp(`DATABASE_URL sets "${name}"`),
+    );
+  }
+});
+
 test("test mode refuses a DATABASE_URL that can not be read", () => {
   assert.throws(
     () => resolveDatabaseUrl({ OPEN_BRAIN_TEST: "1", DATABASE_URL: "not a url", TEST_DATABASE_URL: TEST }),

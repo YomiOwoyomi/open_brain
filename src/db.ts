@@ -91,6 +91,21 @@ export function describeTestDatabase(url: string): DatabaseIdentity {
 function describeRealDatabase(env: NodeJS.ProcessEnv): DatabaseIdentity | null {
   const url = env.DATABASE_URL;
   if (!url?.trim()) return null;
+  // A query parameter can move pg to another host, port or database, so the
+  // comparison below would check the wrong database. Refuse it in test mode.
+  let params: URLSearchParams | null = null;
+  try {
+    params = new URL(url.trim()).searchParams;
+  } catch {
+    // The parse error is reported below.
+  }
+  for (const name of OVERRIDE_PARAMS) {
+    if (params?.has(name)) {
+      throw new Error(
+        `DATABASE_URL sets "${name}" as a query parameter, so test mode can not prove that the test database is a different one. Unset DATABASE_URL for the test run.`,
+      );
+    }
+  }
   try {
     const parsed = new URL(url.trim());
     // With no host or port in the URL, pg uses PGHOST and PGPORT, then

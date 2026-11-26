@@ -57,5 +57,6 @@ Treat `README.md`, `package.json`, `src/`, `schema*.sql`, and `scripts/` as auth
 2. To run the database tests locally, start a throwaway container: `npm run test:db:up`.
 3. Set `TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:54329/open_brain_test` in the shell, then run `npm test`.
 4. Stop the container with `npm run test:db:down`.
+5. Run `npm run typecheck`. The test runner does not check types, so this command checks the source and the test files.
 
 The test database name must end in `_test`. Tests never read `.env`, and in test mode the server never uses `DATABASE_URL`. Do not run `npm run init-db` or mutate a database without explicit approval. Workers own explicit files; reviewers are read-only.

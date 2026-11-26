@@ -390,6 +390,17 @@ test("a quoted binary file name stops the range scan with exit 2", () => {
   });
 });
 
+test("a commit that is not in the clone gives exit 2 and a fetch hint", () => {
+  withRepo((dir, git) => {
+    const local = commitFile(dir, git, "t.md", "x\n", "start");
+    // A remote commit SHA that this clone does not have.
+    const line = `refs/heads/main ${local} refs/heads/main ${"1".repeat(40)}\n`;
+    const r = runScan(dir, ["--pre-push", "origin"], line);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /git fetch --prune/);
+  });
+});
+
 test("bad arguments exit 2", () => {
   withRepo((dir) => {
     for (const args of [["--range"], ["--range", ""], ["--bogus"]]) {

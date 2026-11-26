@@ -109,6 +109,11 @@ try {
   code = main();
 } catch (err) {
   console.error(`Secret scan could not run: ${err.message}`);
+  // A commit that is not in this clone (for example after a push from
+  // another computer) makes git log fail. Tell the user how to get it.
+  if (/bad revision|unknown revision|bad object|Invalid revision range/i.test(err.message)) {
+    console.error("A commit in the range is not in this clone. Run: git fetch --prune, then try again.");
+  }
   code = 2;
 }
 process.exit(code);

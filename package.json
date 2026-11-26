@@ -19,6 +19,7 @@
     "test:env": "node scripts/test-env.mjs",
     "init-db": "node scripts/init-db.mjs",
     "scan:secrets": "node scripts/check-no-secrets.mjs",
+    "typecheck": "tsc -p tsconfig.test.json",
     "test": "node --import tsx --import ./test/setup.mjs --test --test-concurrency=1 \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
     "test:db:up": "docker run -d --rm --name open_brain_test_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=open_brain_test -p 54329:5432 pgvector/pgvector:pg17",
     "test:db:down": "docker rm -f open_brain_test_db"
@@ -32,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Rixter145/open_brain"
+    "url": "https://github.com/YomiOwoyomi/open_brain"
   },
   "engines": {
     "node": ">=22"
