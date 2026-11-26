@@ -194,7 +194,7 @@ By default the server uses **OpenAI `text-embedding-3-small`** (1536 dimensions)
 - `src/index.ts` – MCP server: 5 tools (capture, search, list, stats, invalidate).
 - `src/db.ts` – Postgres queries: insert, semantic search, recent list, stats, and soft-delete (all reads filter `WHERE invalidated_at IS NULL`).
 - `src/embeddings.ts` – Embedding calls (OpenAI, Google Gemini, or Ollama, env-driven).
-- `scripts/` – `init-db.mjs` (create schema), `test-env.mjs` (validate config), `test-save.mjs` (insert test thought), `encode-password.mjs` (URL-encode a DB password with special chars).
+- `scripts/` – `init-db.mjs` (create schema), `test-env.mjs` (validate config), `test-save.mjs` (insert test thought), `encode-password.mjs` (URL-encode a DB password with special chars), `check-no-secrets.mjs` and `secret-scan.mjs` (secret scan of the tracked files).
 
 ## Publishing to npm
 

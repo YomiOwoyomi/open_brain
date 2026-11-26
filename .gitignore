@@ -2,8 +2,25 @@
 node_modules/
 dist/
 
-# Environment (secrets)
+# Environment (secrets). Only the example file is tracked.
 .env
+.env.*
+!.env.example
+
+# Probe tokens for the public door (they are real bearer tokens)
+.probe-tokens/
+*.token
+
+# Database dumps and backups (they hold real rows)
+dumps/
+*.dump
+*.sql.gz
+
+# The real systemd unit holds local paths. Only the example is tracked.
+deploy/*.service
+
+# gstack review and planning output (local only)
+.gstack/
 
 # OS and editor
 .DS_Store
