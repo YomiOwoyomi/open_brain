@@ -49,4 +49,13 @@ The scan does not read commit messages, author names, file names or tag messages
 
 ## Hermes delivery and safety
 
-Treat `README.md`, `package.json`, `src/`, `schema*.sql`, and `scripts/` as authoritative. Use Node >=18 and run `npm run build` and `npm run test:env` when dependencies and a safe environment are available. Do not run `npm run init-db` or mutate a database without explicit approval. Workers own explicit files; reviewers are read-only.
+Treat `README.md`, `package.json`, `src/`, `schema*.sql`, and `scripts/` as authoritative. Use Node >=22 and run `npm run build` and `npm run test:env` when dependencies and a safe environment are available.
+
+### Tests
+
+1. Run `npm test`. The pure tests need no database. With no `TEST_DATABASE_URL`, the database tests are skipped on a developer machine, but they fail in CI.
+2. To run the database tests locally, start a throwaway container: `npm run test:db:up`.
+3. Set `TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:54329/open_brain_test` in the shell, then run `npm test`.
+4. Stop the container with `npm run test:db:down`.
+
+The test database name must end in `_test`. Tests never read `.env`, and in test mode the server never uses `DATABASE_URL`. Do not run `npm run init-db` or mutate a database without explicit approval. Workers own explicit files; reviewers are read-only.

@@ -18,7 +18,10 @@
     "dev": "tsx src/index.ts",
     "test:env": "node scripts/test-env.mjs",
     "init-db": "node scripts/init-db.mjs",
-    "scan:secrets": "node scripts/check-no-secrets.mjs"
+    "scan:secrets": "node scripts/check-no-secrets.mjs",
+    "test": "node --import tsx --import ./test/setup.mjs --test --test-concurrency=1 \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
+    "test:db:up": "docker run -d --rm --name open_brain_test_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=open_brain_test -p 54329:5432 pgvector/pgvector:pg17",
+    "test:db:down": "docker rm -f open_brain_test_db"
   },
   "keywords": [
     "mcp",
@@ -32,7 +35,7 @@
     "url": "https://github.com/Rixter145/open_brain"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",

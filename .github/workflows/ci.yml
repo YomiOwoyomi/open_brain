@@ -1,0 +1,84 @@
+# CI: build, secret scan and tests on each push and pull request.
+# Rules: read-only token, actions pinned to a commit SHA, no repository secret.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      # A throwaway Postgres with pgvector for the database tests.
+      # The password is a fixed test value for this container only.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: open_brain_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The database tests use this database only. Its name ends in _test.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/open_brain_test
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # The job does not need the token after checkout. Do not keep it in .git/config.
+          persist-credentials: false
+          # The full history, so the scan can read each commit of the push or the pull request.
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      # The scans need no dependency, so they run before npm ci runs any install script.
+      - name: Secret scan (current files)
+        run: node scripts/check-no-secrets.mjs
+
+      # Scan the added lines of each new commit, so a value that one commit adds
+      # and a later commit removes is still found. The event values go through
+      # environment variables, never straight into the script text.
+      - name: Secret scan (each new commit)
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            RANGE="origin/$BASE_REF..HEAD"
+          elif [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -qE '^0+$' && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            RANGE="$BEFORE..HEAD"
+          else
+            # A new branch, a force push or an unknown start commit: scan the full history.
+            # (origin/main..HEAD would be empty for a force push to main.)
+            RANGE="HEAD"
+          fi
+          node scripts/check-no-secrets.mjs --range "$RANGE"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Tests
+        run: npm test
