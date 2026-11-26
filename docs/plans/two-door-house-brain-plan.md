@@ -330,6 +330,15 @@ The Gate 1 review gave PASS WITH CHANGES, with no Critical finding. The owner ap
 - G8. Accept header (Low; tasks H1a and U3). The transport gives `406` to a `POST` whose `Accept` header does not list both `application/json` and `text/event-stream`. Each HTTP test and the probe send that header. Test: a `POST` with no such header gets `406`.
 - G9. Model backfill (Low; task P4). The migration sets `embedding_model` to `nomic-embed-text` only on rows whose vector has 768 values. Other rows keep `NULL`, and the start line counts them as rows with a different model. This replaces the backfill of each row in the Eng item "Model filter". Test: a row with 1536 values keeps `NULL`.
 - G10. Secret scan file set (Low; task P9). The scan reads only the files that `git ls-files` lists, so `node_modules` and `.gstack/tmp` are not read. The plan writes the address range in the short form `100.64/10`, which the scan does not match. The two older plan commits that hold the full form have allow entries scoped to those commits only (PR 1 review). Test: the scan passes on the current tree.
+
+### Gate 2 notes for later tasks (solutions-architect code review of PR 1, 2026-11-26)
+
+The Gate 2 review of PR 1 gave PASS WITH CHANGES, with no Critical or High finding. PR 1 applied its small changes. These items change later tasks, and they apply where an item above disagrees.
+
+- G11. Migration logic as a function (Medium; tasks P4 and the test helper). The migration logic goes in an exported function, for example `applyMigrations(client)` in `src/migrate.ts`. `scripts/migrate.mjs` is a thin wrapper that calls it. The test helper calls the function with the guarded URL from `resolveDatabaseUrl()`; it never starts `npm run migrate` as a child process. Reason: the script loads `.env` and reads `DATABASE_URL`, so a child process could change the real database during `npm test`. The script also refuses to run when `OPEN_BRAIN_TEST=1`. Test: the helper applies the migrations to the test database; the script with `OPEN_BRAIN_TEST=1` exits with an error and changes nothing.
+- G12. Provider keys in the configuration list (Medium; tasks P9 and H1b). The configuration table also has `OPENAI_API_KEY` (required when the provider is `openai`, secret), `GOOGLE_API_KEY` (required when the provider is `google`, secret) and `GEMINI_API_KEY` (another name for `GOOGLE_API_KEY`, read only when it is empty). PR 1 lists all three in `.env.example`. The H1b set-equality test includes them.
+- G13. The configuration check uses the database guard (Medium; task H1b). `src/config.ts` calls `resolveDatabaseUrl(env)` in a try/catch and turns its error into one problem line. It does not copy the URL rules. In test mode it does not require `DATABASE_URL`. `getPool()` stays the second guard.
+- G14. Do not rebase this plan branch (Low). `.secret-scan-allow` on `main` names two commits of this branch (`cce6491` and `6fc21ef`). A rebase changes their SHAs, and then the commit scan in CI fails. If a rebase is necessary, update the two entries in the same push.
 ## Review record
 
 ### Phase 1: CEO review (mode: SELECTIVE EXPANSION, via /autoplan)
