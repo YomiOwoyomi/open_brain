@@ -339,6 +339,31 @@ The Gate 2 review of PR 1 gave PASS WITH CHANGES, with no Critical or High findi
 - G12. Provider keys in the configuration list (Medium; tasks P9 and H1b). The configuration table also has `OPENAI_API_KEY` (required when the provider is `openai`, secret), `GOOGLE_API_KEY` (required when the provider is `google`, secret) and `GEMINI_API_KEY` (another name for `GOOGLE_API_KEY`, read only when it is empty). PR 1 lists all three in `.env.example`. The H1b set-equality test includes them.
 - G13. The configuration check uses the database guard (Medium; task H1b). `src/config.ts` calls `resolveDatabaseUrl(env)` in a try/catch and turns its error into one problem line. It does not copy the URL rules. In test mode it does not require `DATABASE_URL`. `getPool()` stays the second guard.
 - G14. Do not rebase this plan branch (Low). `.secret-scan-allow` on `main` names two commits of this branch (`cce6491` and `6fc21ef`). A rebase changes their SHAs, and then the commit scan in CI fails. If a rebase is necessary, update the two entries in the same push.
+
+### Phase 0a result (reach spike S0a, 2026-11-27)
+
+The owner ran the spike on the home server (`spike/phase-0-reach`, commit `56bc523`). Phase 0a passed. The log held header names only, no values. The owner deleted the logs and closed the tunnel in the same hour.
+
+| Check | Result |
+|---|---|
+| Claude Code over the tailnet, plain HTTP (gap G3 of the design gaps) | Passed |
+| The Code tab of the desktop app over the tailnet | Passed |
+| Claude Desktop chat with a local server through `mcp-remote` (gap G2 of the design gaps) | Not tested: version 6.28899.6 shows no Developer section to edit the configuration file |
+| Claude web through Tailscale Funnel (risk 3) | Passed |
+| Phone app through Tailscale Funnel | Passed |
+| OAuth paths that the connector requested | None, because the spike never answered `401`. Phase 0b must find them. |
+| Address header behind Funnel | `X-Forwarded-For` on each request |
+
+Phase 0a acceptance criteria 1, 2 and 3 are met. Criterion 3 records Claude Desktop chat as not tested.
+
+These items are later than the lists above, and they apply where an item above disagrees.
+
+- G15. Pre-auth rate limit key (task U2; replaces the open part of G3). Funnel sends `X-Forwarded-For` on each request, so the 600/min limit uses it as its key. The log held names only, so the spike did not show whether Funnel replaces a value that the client sends or adds to it. The limit therefore uses the last entry of `X-Forwarded-For`, which the tunnel writes, never the first entry, which a client can set. Test: a request with a fake first entry and a real last entry is counted under the last entry.
+- G16. First request falls back (task H1a). Each client (Claude Code, the Code tab, the Claude connector) first sent a `POST /mcp` with an `mcp-method` header. SDK 1.27.1 answered `400`, and the client then sent a normal `initialize`, which succeeded. The doors work with this fallback. Before PR 3, check whether a newer SDK version accepts the first request. H1a adds a test that a client connects after the `400`.
+- G17. Funnel identity headers (Phase 0b). Funnel adds `Tailscale-User-Login` and `Tailscale-User-Name` only to a request from a device on the tailnet. A request from the internet, such as the Claude connector, does not have them. They are not a sign-in for the phone, so the public door keeps OAuth.
+- G18. Scanners find the tunnel at once (Phase 2). About ten seconds after the tunnel opened, automated scanners requested paths such as `/.env`, `/.git/config`, SSH key files and database backups. A Funnel host name is public through certificate logs. This confirms these Phase 2 rules: each path except `/mcp`, `/healthz` and the metadata route gives `404`; the sign-in runs before the body parser; the rate limits apply; a door with no sign-in never has data behind it; a test tunnel closes when the test ends.
+- G19. Claude Desktop chat (task H4, Phase 1). The README block for Claude Desktop chat with `mcp-remote` stays unverified until Phase 1 tests it with the private door. If it fails, the README states that Claude Desktop chat uses the public door through the cloud connector.
+
 ## Review record
 
 ### Phase 1: CEO review (mode: SELECTIVE EXPANSION, via /autoplan)
