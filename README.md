@@ -9,7 +9,7 @@ One shared memory layer for Cursor, Claude, and any MCP client: thoughts stored 
 
 ## Prerequisites
 
-- **Node.js** 18+
+- **Node.js** 22+
 - **Postgres** 15+ with the **pgvector** extension (e.g. [Supabase](https://supabase.com) free tier, or self‑hosted).
 - **OpenAI API key** (for embeddings), **Google AI Studio API key** (see [Using Google AI Studio](#using-google-ai-studio)), or **Ollama** for free local embeddings (see [Using Ollama](#using-ollama-free-embeddings) below).
 
@@ -194,7 +194,8 @@ By default the server uses **OpenAI `text-embedding-3-small`** (1536 dimensions)
 - `src/index.ts` – MCP server: 5 tools (capture, search, list, stats, invalidate).
 - `src/db.ts` – Postgres queries: insert, semantic search, recent list, stats, and soft-delete (all reads filter `WHERE invalidated_at IS NULL`).
 - `src/embeddings.ts` – Embedding calls (OpenAI, Google Gemini, or Ollama, env-driven).
-- `scripts/` – `init-db.mjs` (create schema), `test-env.mjs` (validate config), `test-save.mjs` (insert test thought), `encode-password.mjs` (URL-encode a DB password with special chars).
+- `scripts/` – `init-db.mjs` (create schema), `test-env.mjs` (validate config), `test-save.mjs` (insert test thought), `encode-password.mjs` (URL-encode a DB password with special chars), `check-no-secrets.mjs` and `secret-scan.mjs` (secret scan of the tracked files).
+- `test/` – Tests for `npm test`. The pure tests need no database. For the database tests, see "Tests" in `AGENTS.md`.
 
 ## Publishing to npm
 

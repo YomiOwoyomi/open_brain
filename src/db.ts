@@ -15,14 +15,187 @@ export interface ThoughtRow {
 }
 
 let pool: Pool | null = null;
+/** The URL that the current pool uses. getPool() compares it with each call. */
+let poolUrl: string | null = null;
+
+/** The parts of a database URL that name one database. */
+export interface DatabaseIdentity {
+  host: string;
+  port: string;
+  database: string;
+}
+
+/** Host names that all mean "this machine" (the 127.x.x.x range is checked separately). */
+const LOCAL_HOSTS = new Set(["localhost", "0.0.0.0", "::1", "[::1]", "host.docker.internal"]);
+
+/** Give each name for "this machine" one form, so two forms of one address compare as equal. */
+function normalizeHost(hostname: string): string {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  if (LOCAL_HOSTS.has(host) || /^127\./.test(host)) return "localhost";
+  return host;
+}
+
+/** Query parameters that the pg driver reads to change the host, port, user or database. */
+const OVERRIDE_PARAMS = ["host", "hostaddr", "port", "db", "database", "dbname", "user"];
+
+/**
+ * Read the host, port and database name from a test database URL.
+ *
+ * The test guard must check the same database that the pg driver connects
+ * to. For that reason the function refuses each URL form where the driver
+ * can take the database from a different place than the URL path:
+ *   - a protocol other than postgres:// or postgresql:// (for example socket:)
+ *   - a query parameter that sets the host, port, user or database
+ *   - a "%" in the database name, because two decoders can read it differently
+ */
+export function describeTestDatabase(url: string): DatabaseIdentity {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("TEST_DATABASE_URL is not a valid URL.");
+  }
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+    throw new Error("TEST_DATABASE_URL must start with postgres:// or postgresql://.");
+  }
+  for (const name of OVERRIDE_PARAMS) {
+    if (parsed.searchParams.has(name)) {
+      throw new Error(`TEST_DATABASE_URL must not set "${name}" as a query parameter. Put it in the URL itself.`);
+    }
+  }
+  const rawName = parsed.pathname.replace(/^\//, "");
+  if (rawName.includes("%")) {
+    throw new Error("The test database name must not contain encoded characters.");
+  }
+  // With no host or port in the URL, pg reads PGHOST and PGPORT, so the guard
+  // could check a different server than the one pg connects to.
+  if (!parsed.hostname || !parsed.port) {
+    throw new Error("TEST_DATABASE_URL must name the host and the port, for example localhost:54329.");
+  }
+  // pg reads an encoded host (for example %2Ftmp) as a Unix socket folder.
+  if (parsed.hostname.includes("%")) {
+    throw new Error("The test database host must not contain encoded characters.");
+  }
+  return {
+    host: normalizeHost(parsed.hostname),
+    port: parsed.port,
+    database: rawName,
+  };
+}
+
+/**
+ * Read the host, port and database name of DATABASE_URL, to compare it with
+ * the test URL. Returns null when DATABASE_URL is not set. Throws when it is
+ * set but can not be read, because then the comparison could not protect it.
+ */
+function describeRealDatabase(env: NodeJS.ProcessEnv): DatabaseIdentity | null {
+  const url = env.DATABASE_URL;
+  if (!url?.trim()) return null;
+  // A query parameter can move pg to another host, port or database, so the
+  // comparison below would check the wrong database. Refuse it in test mode.
+  let params: URLSearchParams | null = null;
+  try {
+    params = new URL(url.trim()).searchParams;
+  } catch {
+    // The parse error is reported below.
+  }
+  for (const name of OVERRIDE_PARAMS) {
+    if (params?.has(name)) {
+      throw new Error(
+        `DATABASE_URL sets "${name}" as a query parameter, so test mode can not prove that the test database is a different one. Unset DATABASE_URL for the test run.`,
+      );
+    }
+  }
+  try {
+    const parsed = new URL(url.trim());
+    // With no host or port in the URL, pg uses PGHOST and PGPORT, then
+    // localhost and 5432. Use the same defaults, so the comparison checks
+    // the server that pg would connect to.
+    return {
+      host: normalizeHost(parsed.hostname || env.PGHOST || "localhost"),
+      port: parsed.port || env.PGPORT || "5432",
+      database: decodeURIComponent(parsed.pathname.replace(/^\//, "")),
+    };
+  } catch {
+    throw new Error(
+      "DATABASE_URL can not be read, so test mode can not prove that the test database is a different one. Unset DATABASE_URL for the test run.",
+    );
+  }
+}
+
+/**
+ * Select the database URL from the environment.
+ *
+ * Normal mode: use DATABASE_URL.
+ * Test mode (OPEN_BRAIN_TEST=1): use TEST_DATABASE_URL only, and throw unless
+ *   1. TEST_DATABASE_URL is set,
+ *   2. its database name ends in "_test" (see describeTestDatabase), and
+ *   3. it does not name the same database as DATABASE_URL. The check compares
+ *      host, port and name, so "localhost" and "127.0.0.1" count as the same.
+ * These rules make sure that a test can never change the real database.
+ *
+ * The function takes the environment as a parameter, so a test can call it
+ * with no change to process.env.
+ */
+export function resolveDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.OPEN_BRAIN_TEST === "1") {
+    const testUrl = env.TEST_DATABASE_URL?.trim();
+    if (!testUrl) {
+      throw new Error("OPEN_BRAIN_TEST=1 needs TEST_DATABASE_URL. The real DATABASE_URL is not used in test mode.");
+    }
+    const test = describeTestDatabase(testUrl);
+    if (!/^[A-Za-z0-9_]+_test$/.test(test.database)) {
+      throw new Error("The test database name must end in _test. The test mode refuses to use this database.");
+    }
+    const real = describeRealDatabase(env);
+    if (real && real.host === test.host && real.port === test.port && real.database === test.database) {
+      throw new Error("TEST_DATABASE_URL names the same database as DATABASE_URL. Tests need a separate database.");
+    }
+    return testUrl;
+  }
+  const url = env.DATABASE_URL?.trim();
+  if (!url) throw new Error("DATABASE_URL is required");
+  return url;
+}
 
 function getPool(): Pool {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL is required");
+  // Read the URL again on each call. If the mode or the URL changed after the
+  // pool was made (for example, test mode turned on late), refuse to use the
+  // old pool, because it can point at the real database.
+  const url = resolveDatabaseUrl();
+  if (pool && url !== poolUrl) {
+    throw new Error("The database URL changed after the pool was made. Call closePool() first.");
+  }
   if (!pool) {
-    pool = new pg.Pool({ connectionString: url, max: 5 });
+    poolUrl = url;
+    pool = new pg.Pool({
+      connectionString: url,
+      max: 5,
+      // Fail a connection attempt after 5 seconds, not after the OS timeout.
+      connectionTimeoutMillis: 5_000,
+      // Postgres stops a statement that runs longer than 10 seconds.
+      statement_timeout: 10_000,
+    });
+    // An idle connection can fail (for example, when Postgres restarts).
+    // Without this handler the error would stop the whole process.
+    pool.on("error", (err) => {
+      console.error(`Database pool error: ${err.message}`);
+    });
   }
   return pool;
+}
+
+/**
+ * Close the pool and its connections. Tests call it at the end, so Node can
+ * exit. A later call of getPool() makes a new pool.
+ */
+export async function closePool(): Promise<void> {
+  if (pool) {
+    const current = pool;
+    pool = null;
+    poolUrl = null;
+    await current.end();
+  }
 }
 
 export async function insertThought(params: {
