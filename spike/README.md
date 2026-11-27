@@ -17,6 +17,7 @@ The server has one tool, `brain_stats`, which returns fixed zero counts. It has 
 |---|---|
 | `<tailnet-ip>` | The Tailscale IPv4 address of the home server (`tailscale ip -4`) |
 | `<funnel-host>` | The Funnel host name of the home server (it ends in `.ts.net`) |
+| `<server-name>` | The name of the home server in the tailnet (as `tailscale status` shows it) |
 
 ## Where each step runs
 
@@ -42,7 +43,11 @@ The spike needs Node.js 22 or later. On the home server, run `node --version`.
 Part 1 with Docker (tailnet address, port 8787):
 
 ```bash
-docker run --rm -i --init --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/app -w /app -e SPIKE_HOST=<tailnet-ip> -e SPIKE_PORT=8787 node:22 sh -c "npm ci --no-audit --no-fund >/dev/null && node spike/reach-server.mjs" 2> reach-tailnet.log
+TSIP=$(tailscale ip -4)
+```
+
+```bash
+docker run --rm -i --init --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/app -w /app -e SPIKE_HOST="$TSIP" -e SPIKE_PORT=8787 node:22 sh -c "npm ci --no-audit --no-fund >/dev/null && node spike/reach-server.mjs" 2> reach-tailnet.log
 ```
 
 Part 2 with Docker (loopback, port 8788):
@@ -67,25 +72,43 @@ Notes on these commands:
 
 Do these steps on the home server:
 
-1. Get the spike branch:
+1. Clone the fork on the spike branch into a new folder, and go into it. The fork is public, so no sign-in is needed. If git is not installed, install it first (for example `sudo apt install git`).
    ```bash
-   git fetch origin
-   git switch spike/phase-0-reach
+   git clone --branch spike/phase-0-reach https://github.com/YomiOwoyomi/open_brain.git ~/open_brain-spike
+   cd ~/open_brain-spike
+   ```
+   If you use Node (not Docker), also install the packages:
+   ```bash
    npm ci
    ```
+   Then read the tailnet address into a variable, so you do not type it:
+   ```bash
+   TSIP=$(tailscale ip -4)
+   ```
+   The server commands below use `"$TSIP"`.
 2. Start the spike on the tailnet address, port 8787 (with Docker, use the Part 1 command above):
    ```bash
-   SPIKE_HOST=<tailnet-ip> SPIKE_PORT=8787 node spike/reach-server.mjs 2> reach-tailnet.log
+   SPIKE_HOST="$TSIP" SPIKE_PORT=8787 node spike/reach-server.mjs 2> reach-tailnet.log
    ```
 
 Do these steps on the PC:
 
-3. Add the spike to Claude Code:
-   ```bash
-   claude mcp add --transport http open-brain-spike http://<tailnet-ip>:8787/mcp
+3. Add the spike to Claude Code. In PowerShell, read the address of the home server by its tailnet name first:
+   ```powershell
+   $ip = tailscale ip -4 <server-name>
+   claude mcp add --transport http open-brain-spike "http://${ip}:8787/mcp"
    ```
-4. In Claude Code, ask: "Call the brain_stats tool of open-brain-spike." The result shows `Total thoughts: 0`.
-5. In the Claude Desktop configuration file, add this server under `mcpServers`. Claude Desktop starts the `mcp-remote` bridge locally, and the bridge connects over the tailnet:
+4. Call the tool. The result shows `Total thoughts: 0`. If you get an auth error, the `claude` command is not signed in: start `claude`, type `/login`, then try again.
+   ```powershell
+   claude -p "Call the brain_stats tool of open-brain-spike and show the result." --allowedTools "mcp__open-brain-spike__brain_stats"
+   ```
+5. In the Claude Desktop configuration file, add this server under `mcpServers`. Claude Desktop starts the `mcp-remote` bridge locally, and the bridge connects over the tailnet.
+   The file is not always in `%APPDATA%\Claude\`. A Claude Desktop from the newer Windows installer keeps it under `%LOCALAPPDATA%\Packages\Claude_...\LocalCache\Roaming\Claude\`. Open it with **Settings**, then **Developer**, then **Edit Config**, or find it with PowerShell:
+   ```powershell
+   Get-ChildItem "$env:LOCALAPPDATA\Packages", "$env:APPDATA\Claude" -Filter claude_desktop_config.json -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+   ```
+   Version 6.28899.6 of the desktop app showed no Developer section. If you can not find the file, skip steps 5 and 6, and record "not tested".
+   The block to add:
    ```json
    "open-brain-spike": {
      "command": "npx",
@@ -151,12 +174,20 @@ Then delete the two log files on the home server. Do not copy them into the repo
 
 Fill this table with yes, no, or a short note. Do not write a host name, an address or a URL.
 
+Result of the run on 2026-11-27 (the plan records it as "Phase 0a result", items G15 to G19):
+
 | Check | Result |
 |---|---|
-| Claude Code over the tailnet (plain HTTP) | |
-| Claude Desktop over the tailnet with `mcp-remote` | |
-| Claude web through Funnel | |
-| Phone app through Funnel | |
-| Other paths that the connector requested | |
-| Address header names behind Funnel (for G3) | |
-| Tunnel closed in the same hour | |
+| Claude Code over the tailnet (plain HTTP) | Yes |
+| The Code tab of the desktop app over the tailnet | Yes |
+| Claude Desktop chat over the tailnet with `mcp-remote` | Not tested (no Developer section in version 6.28899.6) |
+| Claude web through Funnel | Yes |
+| Phone app through Funnel | Yes |
+| Other paths that the connector requested | None (the spike never answered `401`, so the connector did not look for OAuth) |
+| Address header names behind Funnel (for G3) | `x-forwarded-for` on each request; `tailscale-user-login` and `tailscale-user-name` only from a tailnet device |
+| Tunnel closed in the same hour | Yes |
+
+Other observations:
+
+- Each client first got `400` for a `POST /mcp` with an `mcp-method` header, then fell back to `initialize`, which worked.
+- About ten seconds after the tunnel opened, automated scanners requested paths such as `/.env`, `/.git/config` and SSH key files. Each got `404`.
