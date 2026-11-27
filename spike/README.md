@@ -18,7 +18,47 @@ The server has one tool, `brain_stats`, which returns fixed zero counts. It has 
 | `<tailnet-ip>` | The Tailscale IPv4 address of the home server (`tailscale ip -4`) |
 | `<funnel-host>` | The Funnel host name of the home server (it ends in `.ts.net`) |
 
-## Check on this PC first
+## Where each step runs
+
+The home server is the Linux server that runs Docker. The PC is the computer with Claude Code and Claude Desktop.
+
+| Step | Where |
+|---|---|
+| Local check | PC (optional) |
+| Part 1, steps 1, 2 and 9: get the branch, start the spike, stop it | Home server |
+| Part 1, steps 3 to 8: Claude Code and Claude Desktop | PC |
+| Part 2, steps 1, 2, 10 and 12: start the spike, open and close the tunnel, stop the spike | Home server |
+| Part 2, steps 3 and 11: open the `/healthz` URL | PC, in a browser |
+| Part 2, steps 4 to 9: the custom connector | Claude web in a browser, then the phone app |
+| Read the logs, then delete them | Home server |
+
+## Node.js or Docker on the home server
+
+The spike needs Node.js 22 or later. On the home server, run `node --version`.
+
+- If the version is 22 or later, use the `npm ci` and `node` commands in Part 1 and Part 2.
+- If Node.js is not installed or is older, use Docker. Run each command in the repository folder on the home server. The commands replace `npm ci` and the `node spike/reach-server.mjs` line.
+
+Part 1 with Docker (tailnet address, port 8787):
+
+```bash
+docker run --rm -i --init --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/app -w /app -e SPIKE_HOST=<tailnet-ip> -e SPIKE_PORT=8787 node:22 sh -c "npm ci --no-audit --no-fund >/dev/null && node spike/reach-server.mjs" 2> reach-tailnet.log
+```
+
+Part 2 with Docker (loopback, port 8788):
+
+```bash
+docker run --rm -i --init --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/app -w /app -e SPIKE_HOST=127.0.0.1 -e SPIKE_PORT=8788 node:22 sh -c "npm ci --no-audit --no-fund >/dev/null && node spike/reach-server.mjs" 2> reach-funnel.log
+```
+
+Notes on these commands:
+
+- `--network host` lets the container listen on the tailnet address and on loopback of the home server itself.
+- Do not add `-t`. With `-t`, the error output goes to the terminal, and the log file stays empty.
+- `--user` makes `npm ci` write `node_modules` as your user, not as root.
+- Stop the spike with Ctrl+C. `--init` passes the stop signal to Node.js.
+
+## Check on the PC first (optional)
 
 1. Run `node spike/check-reach-server.mjs`.
 2. Make sure that the output says `All 10 checks passed.`
@@ -33,7 +73,7 @@ Do these steps on the home server:
    git switch spike/phase-0-reach
    npm ci
    ```
-2. Start the spike on the tailnet address, port 8787:
+2. Start the spike on the tailnet address, port 8787 (with Docker, use the Part 1 command above):
    ```bash
    SPIKE_HOST=<tailnet-ip> SPIKE_PORT=8787 node spike/reach-server.mjs 2> reach-tailnet.log
    ```
@@ -63,7 +103,7 @@ Do these steps on the PC:
 
 Do these steps on the home server:
 
-1. Start the spike on loopback, port 8788:
+1. Start the spike on loopback, port 8788 (with Docker, use the Part 2 command above):
    ```bash
    node spike/reach-server.mjs 2> reach-funnel.log
    ```
